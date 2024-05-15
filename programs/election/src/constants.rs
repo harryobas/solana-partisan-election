@@ -1,0 +1,1 @@
+pub const ELECTION_SEED: &str = "elecction"; 
