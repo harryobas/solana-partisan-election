@@ -17,11 +17,11 @@ pub mod election {
        let election = &mut ctx.accounts.election;
        election.name = name;
        election.vote_count = 0;
-       election.voter_register = vec![];
-       election.party_register = vec![];
+       election.voter_register = std::collections::HashSet::new();
+       election.party_register = std::collections::HashSet::new();
        election.ballot_box = vec![];
        election.result_sheet = std::collections::HashMap::new();
-       election.owner = ctx.accounts.payer.key();
+       election.authority = ctx.accounts.payer.key();
        election.voting_open = false;
 
         Ok(())
@@ -30,7 +30,7 @@ pub mod election {
         let election = &mut ctx.accounts.election;
         let voter_id = ctx.accounts.authority.key();
 
-        election.voter_register.push(voter_id);
+        election.voter_register.insert(voter_id);
 
         Ok(())
 
@@ -38,7 +38,7 @@ pub mod election {
     pub fn register_party(ctx: Context<RegisterParty>, party_name: String) -> Result<()> {
         
         let election = &mut ctx.accounts.election;
-        election.party_register.push(party_name);
+        election.party_register.insert(party_name);
 
         Ok(())
 
@@ -48,12 +48,21 @@ pub mod election {
         let election = &mut ctx.accounts.election;
         let voter_id = ctx.accounts.authority.key();
 
-        if !election.party_register.contains(&ballot){
-            return Err(ProgramError::InvalidArgument);
-        }
-        if !election.voter_register.contains(&voter_id){
-            return Err(ProgramError::InvalidArgument);
-        }
+        require!(
+            election.voting_open == true,
+            ElectionError::VotingNotOpen
+        );
+
+        require!(
+            election.voter_register.contains(&voter_id),
+            ElectionError::NotRegisteredToVote
+        );
+
+        require!(
+            election.party_register.contains(&ballot),
+            ElectionError::InvalidArgument
+        );
+    
         election.ballot_box.push(ballot);
         election.vote_count += 1;
 
@@ -61,25 +70,42 @@ pub mod election {
     }
     pub fn close_voting(ctx: Context<CloseVoting>) -> Result<()> {
         let election = &mut ctx.accounts.election;
-        if election.owner != ctx.accounts.authority.key(){
-            return Err(ProgramError::InvalidArgument);
-        }
+
+        require!(
+            election.authority == ctx.accounts.authority.key(),
+            ElectionError::Unauthorized 
+        );
+
+        require!(
+            election.voting_open == true,
+            ElectionError::VotingAlreadyClosed
+        );
+
         election.voting_open = false;
-        let results = election.ballot_box;
-        let  result_sheet = election.result_sheet;
-        for result in &results {
-            let count = result_sheet.entry(*result).or_insert(0);
+
+        let mut result_sheet = election.result_sheet.clone();
+
+        for ballot in election.ballot_box.iter() {
+            let count = result_sheet.entry(ballot.to_string()).or_insert(0);
             *count += 1;
         };
-          
+
+        election.result_sheet = result_sheet;
 
         Ok(())
     }
+
     pub fn open_voting(ctx: Context<OpenVoting>) -> Result<()> {
         let election = &mut ctx.accounts.election;
-        if election.owner!= ctx.accounts.authority.key(){
-            return Err(ProgramError::InvalidArgument);
-        }
+        require!(
+            election.authority == ctx.accounts.authority.key(),
+            ElectionError::Unauthorized 
+        );
+        require!(
+            election.voting_open == false,
+            ElectionError::VotingAlreadyOpen
+        );
+
         election.voting_open = true;
 
         Ok(())
@@ -88,6 +114,7 @@ pub mod election {
 }
 
 #[derive(Accounts)]
+#[instruction()]
 pub struct Initialize<'info> {
     #[account(
         init,
@@ -106,7 +133,7 @@ pub struct Initialize<'info> {
 #[derive(Accounts)]
 pub struct RegisterVoter<'info> {
     #[account(mut)]
-    pub election: Account<'info, Election>,
+    pub election: Box<Account<'info, Election>>,
     #[account(mut)]
     pub authority: Signer<'info>,
     pub system_program: Program<'info, System>,
@@ -115,7 +142,7 @@ pub struct RegisterVoter<'info> {
 #[derive(Accounts)]
 pub struct RegisterParty<'info> {
     #[account(mut)]
-    pub election: Account<'info, Election>,
+    pub election: Box<Account<'info, Election>>,
     #[account(mut)]
     pub authority: Signer<'info>,
     pub system_program: Program<'info, System>,
@@ -124,7 +151,7 @@ pub struct RegisterParty<'info> {
 #[derive(Accounts)]
 pub struct CastVote<'info> {
     #[account(mut)]
-    pub election: Account<'info, Election>,
+    pub election: Box<Account<'info, Election>>,
     #[account(mut)]
     pub authority: Signer<'info>,
     pub system_program: Program<'info, System>,
@@ -133,7 +160,7 @@ pub struct CastVote<'info> {
 #[derive(Accounts)]
 pub struct CloseVoting<'info> {
     #[account(mut)]
-    pub election: Account<'info, Election>,
+    pub election: Box<Account<'info, Election>>,
     #[account(mut)]
     pub authority: Signer<'info>,
     pub system_program: Program<'info, System>,
@@ -142,22 +169,23 @@ pub struct CloseVoting<'info> {
 #[derive(Accounts)]
 pub struct OpenVoting<'info> {
     #[account(mut)]
-    pub election: Account<'info, Election>,
+    pub election: Box<Account<'info, Election>>,
     #[account(mut)]
     pub authority: Signer<'info>,
     pub system_program: Program<'info, System>,
 }
 
 
+
 #[account]
 pub struct Election {
     pub name: String,
     pub vote_count: u64,
-    pub voter_register: Vec<Pubkey>,
-    pub party_register: Vec<String>,
+    pub voter_register: std::collections::HashSet<Pubkey>,
+    pub party_register: std::collections::HashSet<String>,
     pub ballot_box: Vec<String>,
     pub result_sheet: std::collections::HashMap<String, u64>,
-    pub owner: Pubkey,
+    pub authority: Pubkey,
     pub voting_open: bool,
 
 }

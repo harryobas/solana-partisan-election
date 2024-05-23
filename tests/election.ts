@@ -18,13 +18,15 @@ describe("election", () => {
   it("Is initialized!", async () => {
     // Add your test here.
     const newElectionAccount = Keypair.generate();
-    const tx = await program.methods.initialize(new anchor.BN("apc")).accounts({
-      election: newElectionAccount.publicKey,
-      payer: provider.wallet.publicKey,
-      systemProgram: SystemProgram.programId
+    const tx = await program.rpc.initialize(new anchor.BN("apc"),{
+      accounts:{
+        election: newElectionAccount.publicKey,
+        payer: provider.wallet.publicKey,
+        systemProgram: SystemProgram.programId,
+      },
+      signers: [newElectionAccount],
     })
-    .signers(newElectionAccount)
-    .rpc(); 
+    
 
     console.log("Your transaction signature", tx);
   })
